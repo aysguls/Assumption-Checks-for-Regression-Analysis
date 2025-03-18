@@ -1,0 +1,241 @@
+---
+title: "Regresyon Dersi Odevi"
+author: "Beyza Kaya,Ece Kılıç,İclal Aydın,Ayşe Gül,Zeynep Çalın"
+date: "2025-01-06"
+output: html_document
+---
+# College Veri Seti Analizi
+
+## Verilerin Hazırlanması
+data olarak ISLR paketindeki College veri setini seçtik.
+```{r, message=FALSE, warning=FALSE}
+library(ISLR)
+data(College)
+library(lmtest)
+library(faraway)
+
+# Eksik veri kontrolü
+library(mice)
+md.pattern(College)
+```
+Mice paketiyle veri setimizde eksik veri kontrolü yaptık ve eksik gozlem olmadığını gördük.
+
+
+### Kategorik Değişkenlerin Dönüştürülmesi
+veri setinde private adindaki değişkenimiz kategorikti, bunu dami değişken kullanarak numaric olarak yes=1 no=0 olacak şekilde değiştirdik. Ve sonrasında kullanmak için faktöre çevirdik.
+```{r, message=FALSE, warning=FALSE}
+College$Private <- ifelse(College$Private == "Yes", 1, 0)
+College$Private <- as.factor(College$Private)
+```
+
+### Eğitim ve Test Veri Setlerinin Ayrılması
+Burada veri setimizi %80i eğitim %20si test olacak şekilde ayırdık. 
+```{r, message=FALSE, warning=FALSE}
+set.seed(123)
+train_index <- sample(1:nrow(College), size = 0.8 * nrow(College))
+train_data <- College[train_index, ]
+test_data <- College[-train_index, ]
+```
+
+## Modelleme
+
+### Tüm Değişkenlerin Kullanıldığı Model
+Burdan sonra artık ilk modelimizi tüm değişkenleri dahil ederek kuruyoruz.
+```{r, message=FALSE, warning=FALSE}
+model <- lm(Grad.Rate ~ ., data = train_data)
+summary(model)
+```
+
+### Anlamsız Değişkenlerin Çıkarıldığı Model
+Modelimizde bazı değişkenler anlamsız olduğu için onları dahil etmeden tekrar modelimizi kuruyoruz.
+```{r, message=FALSE, warning=FALSE}
+model2 <- lm(Grad.Rate ~ Private + Apps + Top25perc + P.Undergrad + Outstate + Room.Board + Personal + perc.alumni + Expend, data = train_data)
+summary(model2)
+```
+Çıkan p değeri 0.05 degerinden küçük olduğu için modelimiz anlamlıdır. 
+Modelin bağımsız değişkenleri, bağımlı değişkeni %44 oranında açıklamaktadır. Bu oran idealden düşüktür.
+
+
+### Aykırı değer kontrolü
+```{r, message=FALSE, warning=FALSE}
+standardized_residuals <- rstandard(model2)
+
+summary(standardized_residuals)
+olcutIndex <- which(abs(standardized_residuals)>2)
+```
+```{r, message=FALSE, warning=FALSE}
+length(olcutIndex)
+
+```
+Verimizde 28 tane aykırı değer çıkmıştır. Bunları temizlemek için cook distance yöntemini kullanacağız.
+
+```{r, message=FALSE, warning=FALSE}
+
+dist <- cooks.distance(model2)
+
+olcut1 <- mean(dist)*3 
+
+olcut2 <- 4/length(dist) 
+
+olcut1;olcut2
+```
+```{r, message=FALSE, warning=FALSE}
+olcut1Index <- which(dist>olcut1)
+olcut2Index <- which(dist>olcut2)
+length(olcut1Index) 
+length(olcut2Index) 
+```
+46 ve 36 tane potansiyel aykırı değerimiz olabilir.
+
+```{r, message=FALSE, warning=FALSE}
+outliers <- which((dist>olcut2)&abs(standardized_residuals)>2) 
+
+length(outliers)
+summary(model2)
+
+
+trainsetrem <- train_data[-outliers,]
+
+nrow(train_data)
+nrow(trainsetrem) 
+```
+```{r, message=FALSE, warning=FALSE}
+model3 <- lm(Grad.Rate ~ Private + Apps + Top25perc + P.Undergrad + Outstate + Room.Board +
+               Personal + perc.alumni + Expend, data = trainsetrem)
+model3
+summary(model3)
+```
+Aykırı değerler modelden çıkarılıp bundan sonra kullanacağımız modelimiz olan model3 oluşturuldu.
+```{r, message=FALSE, warning=FALSE}
+BIC(model3)
+BIC(model2) 
+```
+Model3 ün BIC değerinin daha düşük olduğunu görüyoruz. Model3'ün açıklabilirliğinin arttığını söyleyebiliriz.
+
+## Varsayım Testleri
+
+### Varyans Homojenliği Kontrolü
+Değişen varyans durumunda parametre tahmincilerinin varyansları olduğundan büyük çıkar. Bunu sonucunda t testi sonucu olduğundan küçük bulunur yani anlamlı bir katsayı anlamsız gibi görünebilir.
+Bu araştırma için grafik yöntemi ve bazı testler kullanılmaktadır. Biz burada bunu test etmek için breush-pagan testini kullandık.
+```{r, message=FALSE, warning=FALSE}
+bptest(model3, data = trainsetrem)
+```
+- **H0**: Değişen varyans durumu yoktur.
+- **H1**: Değişen varyans durumu vardır.
+
+P değeri, sıfır hipotezinin reddedilmesine neden olmuştur. Modelde değişen varyans durumu vardır.
+
+#### Grafiksel İnceleme
+Grafiğine bakmak istersek de aşağıdakideki şekildedir.
+```{r, message=FALSE, warning=FALSE}
+plot(model3$fitted.values, model3$residuals, main = "Değişen Varyans Durumu", xlab = "Fitted", ylab = "Residual")
+abline(h = 0, col = "red")
+```
+#### Dönüşüm Denemeleri
+
+Değişen varyans durumunu ortadan kaldırmak için modelde dönüşüm yapmayı denedik.
+```{r, message=FALSE, warning=FALSE}
+model4 <- lm(sqrt(Grad.Rate) ~ Private + Apps + Top25perc + P.Undergrad + Outstate + Room.Board + 
+               Personal + perc.alumni + Expend, data = trainsetrem)
+bptest(model4, data = trainsetrem)
+
+model5 <- lm(log(Grad.Rate) ~ Private + Apps + Top25perc + P.Undergrad + Outstate + Room.Board + Personal +
+               perc.alumni + Expend, data = trainsetrem)
+bptest(model5, data = trainsetrem)
+
+plot(model4$fitted.values, model4$residuals, main = "Değişen Varyans Durumu", xlab = "Fitted", ylab = "Residual")
+abline(h = 0, col = "red")
+
+plot(model5$fitted.values, model5$residuals, main = "Değişen Varyans Durumu", xlab = "Fitted", ylab = "Residual")
+abline(h = 0, col = "red")
+```
+                                                            Her iki dönüşümde de değişen varyans durumu devam etmektedir. Bu nedenle varsayım yorumlamaya **model2** üzerinden devam edilmiştir.
+
+### Normallik Testi
+Hipotez testi ve güven aralıkları belirlemek için önemlidir. Datadaki gözlem sayısı fazlaysa dağılım normale doğru yaklaşmaktadır. Normallik kontrolü için bazı grafikler veya Shapiro testi kullanılır.
+```{r, message=FALSE, warning=FALSE}
+qqnorm(residuals(model3), ylab = "Residuals")
+qqline(residuals(model3), col = "red")
+hist(residuals(model3))
+
+shapiro.test(residuals(model3))
+```
+- **H0**: Veri normal dağılıma sahiptir.
+- **H1**: Veri normal dağılıma sahip değildir.
+
+P değeri 0.05'ten büyük olduğu için normallik varsayımı sağlanmıştır.
+Grafiklerimizin yorumlarından da aynı sonuca varabiliriz. Qqplot grafiğimizde değerlerimiz çizginin etrafında ve histogramda da normal dağılıma benzer bir durum görülmektedir.
+
+### Otokorelasyon Testi
+Hataların ilişkisiz olmasıdır. Eğer otokorelasyon varsa modelin güvenilirliği sıkıntıya düşebilir. Olmamasını isteriz. İlişki varsa ve pozitif yönlüyse modelin üzerine etkisi negatiftir çünkü varyansların üzerinde düşürücü etki yapar.
+İlişki negatif yönlüyse varyansa şişirici yönde etki eder, olmaması gereken değişkenin modele eklenmesine neden olur.
+Otokolerasyon testi için plota veya durbin-watson testine bakılır.
+```{r, message=FALSE, warning=FALSE}
+n <- length(residuals(model3))
+plot(tail(residuals(model3), n - 1), head(residuals(model3), n - 1),
+     xlab = expression(hat(epsilon)[i]), ylab = expression(hat(epsilon)[i-1]))
+
+dwtest(model3, data = trainsetrem)
+```
+- **H0**: Hatalar ilişkisizdir.
+- **H1**: Hatalar ilişkilidir.
+
+P değeri 0.05'ten büyük olduğundan sıfır hipotezi reddedilemez. Hatalar ilişkisizdir.
+Grafikte de görüldüğü gibi hatalar ei sapkalar etrafında rastgele bir biçimde dağılmaktadır. Yani hataların ilişkisiz
+olduğu yorumunu yapabiliriz.
+
+### Multicollinearity Testi
+Bağımsız değişkenlerin birbiriyle ilişki olma durumudur. Bu istenmeyen bir durumdur. Çünkü bağımlı değişken üzerinde birden fazla benzer bilgiyi kullanmak istemeyiz. Bu test için korelasyon veya Vıf testine bakılır.
+
+Öncelikle korelasyonlarına bakmak için tüm değişenleri numerik hale getirdik. Bunun sonucunda 0.8 değerine yakın veya daha büyük değerler çıktığı için multicollinearity işareti olabilir. Buradan kesin bir sonuç çıkaramayız.
+```{r, message=FALSE, warning=FALSE}
+numeric_cols <- College[sapply(College, is.numeric)]
+cor(numeric_cols)
+
+vif(model3)
+```
+- Kesin sonuç için VIF testi yapılmıştır.
+- Tüm VIF değerleri 10'dan küçük olduğu için multicollinearity sorunu bulunmamaktadır.
+
+
+###TEST
+```{r, message=FALSE, warning=FALSE}
+ library(caret)
+ predictions <- predict(model3,test_data)
+ a <- R2(predictions, test_data$Grad.Rate)
+
+
+predictions1 <- predict(model3, train_data)
+b <-R2(predictions1, train_data$Grad.Rate)
+a;b
+```
+##testimizin performans değerlendirmesi
+```{r, message=FALSE, warning=FALSE}
+RMSE(predictions, test_data$Grad.Rate) 
+MAE(predictions, test_data$Grad.Rate)
+```
+Rmse başka modelle kıyaslanırsa anlamlı olur.
+
+## Eğitim performans değerlendirmesi
+
+```{r, message=FALSE, warning=FALSE}
+RMSE(predictions1, train_data$Grad.Rate) 
+MAE(predictions1, train_data$Grad.Rate)
+```
+Küçük rmse modelin tahminlerinin gerçek değerlere yakın olduğunu gösterir.
+küçük mae modelin tahminlerinin gerçek değerlere yakın olduğunu gösterir.
+
+Test değerlendirme kriterlerimiz RMSE ve MAE eğitiminkilerden yüksek çıktı.
+
+
+## Sonuç
+Varsayım testlerinin sonucunda model3 için:
+1. **Varyans homojenliği sağlanmamıştır.**
+2. **Normallik varsayımı sağlanmıştır.**
+3. **Otokorelasyon varsayımı sağlanmıştır.**
+4. **Multicollinearity problemi bulunmamaktadır.**
+
+
+
+
+
